@@ -84,8 +84,6 @@ def traverse_links(url_to_traverse):
 
     global counter
 
-    pool = ThreadPool(100)
-
     if len(url_to_traverse) < 10:
         return
 
@@ -109,15 +107,19 @@ def traverse_links(url_to_traverse):
     doc = {
         'title': soups.title.string,
         'links': links,
-        'text': str(filter(visible, data))
+        'text': " ".join(list(map(lambda x: x.strip("\n\r "), (list(filter(visible, data))))))
     }
 
     link_doc_id = link_doc.insert_one(doc)
     logging.info(
         f'Inserted Successfuly from {url_to_traverse} with ID: {link_doc_id}')
 
-    pool.map(traverse_links, links)
-    pool.wait_completion()
+    for link in links:
+        traverse_links(link)
+
+    # pool = ThreadPool(100)
+    # pool.map(traverse_links, links)
+    # pool.wait_completion()
 
 
 traverse_links(input("Enter the initial link:"))
