@@ -13,6 +13,7 @@ import socket
 import logging
 import socks
 import billiard
+import sys
 
 from os import path
 from queue import Queue
@@ -56,6 +57,8 @@ class ThreadPool:
         self.tasks.join()
 
 
+sys.setrecursionlimit(50000)
+
 config = configparser.ConfigParser()
 config.read("CONFIG.ini")
 
@@ -87,9 +90,15 @@ def traverse_links(url_to_traverse):
     if len(url_to_traverse) < 10:
         return
 
-    response = requests.get(url_to_traverse)
-    soups = BeautifulSoup(response.content, "lxml")
-    data = soups.findAll(text=True)
+    try:
+        response = requests.get(url_to_traverse)
+        soups = BeautifulSoup(response.content, "lxml")
+        data = soups.findAll(text=True)
+        logging.info(
+            "Connection to {0} successfully established".format(url_to_traverse))
+    except:
+        logging.info(
+            "Error establishing connection to {0}".format(url_to_traverse), exc_info=True)
 
     links = []
     for soup in soups.findAll('a'):
@@ -98,16 +107,17 @@ def traverse_links(url_to_traverse):
             if "http" in current_link[:5]:
                 links.append(current_link)
                 counter += 1
-                logging.info("Link Appended - {0}".format(current_link))
-                logging.info("Counter = {0}".format(counter))
+                logging.info(
+                    "Link {1} Appended - {0}".format(current_link, counter))
         except:
             logging.error(
                 f'Error fetching links from {url_to_traverse}', exc_info=True)
 
     doc = {
+        'link': url_to_traverse,
         'title': soups.title.string,
         'links': links,
-        'text': " ".join(list(map(lambda x: x.strip("\n\r "), (list(filter(visible, data))))))
+        'text': "".join(list(map(lambda x: x.strip("\n\r "), list(filter(visible, data)))))
     }
 
     link_doc_id = link_doc.insert_one(doc)
