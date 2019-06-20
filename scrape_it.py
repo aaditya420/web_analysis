@@ -1,21 +1,14 @@
 import requests
-
-import logging
+import logging.config
 import configparser
-import pprint
 import re
+import time
+import sys
+import billiard
 
 from pymongo import MongoClient
 from bs4 import BeautifulSoup, SoupStrainer
 
-import time
-import socket
-import logging
-import socks
-import billiard
-import sys
-
-from os import path
 from queue import Queue
 from threading import Thread
 from billiard.context import Process
@@ -57,82 +50,51 @@ class ThreadPool:
         self.tasks.join()
 
 
-sys.setrecursionlimit(50000)
+class ScrapeQuestionsByTag:
 
-config = configparser.ConfigParser()
-config.read("CONFIG.ini")
+    def __init__(self, base_url, total_pages, num_threads=100, time_bw_requests=1):
+        self.base_url = base_url
+        self.tags = []
+        self.total_pages = total_pages
+        self.num_threads = num_threads
+        self.time_bw_requests = time_bw_requests
 
-logging.basicConfig(level=int(config['LOGGING']
-                              ['LEVEL']), filename=config['LOGGING']['FILENAME'],
-                    filemode=config['LOGGING']['FILEMODE'],
-                    format='[ %(asctime)s - %(process)d - %(levelname)s ] %(message)s')
+        self.client = MongoClient('localhost', 27017)
+        self.db = self.client['WEB_SCRAPER']
+        self.col = self.db['LINKS_STACK']
 
-client = MongoClient(config['MONGODB']['CLIENT_IP'],
-                     int(config['MONGODB']['CLIENT_PORT']))
-db = client[config['MONGODB']['DB_NAME']]
-link_doc = db[config['MONGODB']['COLLECTION_NAME']]
+        logging.config.fileConfig('LOG_CONFIG.ini')
 
-counter = 0
+    def find_tags(self, page_num):
+        time.sleep(self.time_bw_requests)
+        response = requests.get(
+            self.base_url + '?page=' + str(page_num) + '&tab=popular')
+        logging.info(f'\nOn page {page_num}\n')
+        soups = BeautifulSoup(response.content, 'lxml')
+        question_tags = soups.find_all('a', attrs={'class': 'post-tag'})
+        for tag in question_tags:
+            self.tags.append(tag)
 
+            doc = {
+                'page_num': page_num,
+                'tag_link': str(tag),
+                'tag_name': tag.string
+            }
+            self.col.insert_one(doc)
 
-def visible(element):
-    if element.parent.name in ['style', 'script', '[document]', 'head', 'title']:
-        return False
-    elif re.match('<!--.*-->', str(element.encode('utf-8'))):
-        return False
-    return True
+            logging.info(f'Tag found - {tag.string}')
 
-
-def traverse_links(url_to_traverse):
-
-    global counter
-
-    if len(url_to_traverse) < 10:
-        return
-
-    try:
-        response = requests.get(url_to_traverse)
-        soups = BeautifulSoup(response.content, "lxml")
-        data = soups.findAll(text=True)
-        logging.info(
-            "Connection to {0} successfully established".format(url_to_traverse))
-    except:
-        logging.info(
-            "Error establishing connection to {0}".format(url_to_traverse), exc_info=True)
-
-    links = []
-    for soup in soups.findAll('a'):
-        try:
-            current_link = soup.get('href')
-            if "http" in current_link[:5]:
-                links.append(current_link)
-                counter += 1
-                logging.info(
-                    "Link {1} Appended - {0}".format(current_link, counter))
-        except:
-            logging.error(
-                f'Error fetching links from {url_to_traverse}', exc_info=True)
-
-    doc = {
-        'link': url_to_traverse,
-        'title': soups.title.string,
-        'links': links,
-        'text': "".join(list(map(lambda x: x.strip("\n\r "), list(filter(visible, data)))))
-    }
-
-    link_doc_id = link_doc.insert_one(doc)
-    logging.info(
-        f'Inserted Successfuly from {url_to_traverse} with ID: {link_doc_id}')
-
-    for link in links:
-        traverse_links(link)
-
-    # pool = ThreadPool(100)
-    # pool.map(traverse_links, links)
-    # pool.wait_completion()
+    def find_all_tags(self):
+        pool = ThreadPool(self.num_threads)
+        pool.map(self.find_tags, self.total_pages)
+        pool.wait_completion()
 
 
-traverse_links(input("Enter the initial link:"))
+if __name__ == "__main__":
+    start_time = time.time()
 
-for links in link_doc.find({}):
-    pprint.pprint(links)
+    scrape = ScrapeQuestionsByTag(
+        "https://stackoverflow.com/tags", range(1528, 1625), 125, 10)
+    scrape.find_all_tags()
+
+    print("exec_time:", time.time() - start_time)
