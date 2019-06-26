@@ -70,16 +70,32 @@ class ScrapeQuestionsByTag:
 
         logging.config.fileConfig('LOG_CONFIG.ini')
 
+    def get_base_url(self):
+        return self.base_url
+
+    def set_base_url(self, base_url):
+        self.base_url = base_url
+
+    def get_tags(self):
+        return self.tags
+
+    def set_tags(self, tags):
+        self.tags = tags
+
     def set_proxies(self, proxy):
         self.session.proxies['http'] = proxy
         self.session.proxies['https'] = proxy
 
     def find_tags(self, page_num: int):
         time.sleep(self.time_bw_requests)
+
         response = self.session.get(
             self.base_url + 'tags?page=' + str(page_num) + '&tab=popular')
+
         logging.info(f'\nOn page {page_num}\n')
+
         soups = BeautifulSoup(response.content, 'lxml')
+
         question_tags = soups.find_all('a', attrs={'class': 'post-tag'})
         for tag in question_tags:
             self.tags.append(tag.string)
@@ -182,7 +198,8 @@ class ScrapeQuestionsByTag:
         pool = ThreadPool(self.num_threads)
         logging.info("Pool initiated!")
         self.pages_per_tag = list(
-            map(lambda x: str(x)+"::"+tag, self.pages_per_tag))
+            map(lambda x: str(x)+"::"+tag, self.pages_per_tag)
+        )
         pool.map(self.find_questions, self.pages_per_tag)
         logging.info("Pool mapped! {0}".format(self.pages_per_tag))
         pool.wait_completion()
